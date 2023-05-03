@@ -1,0 +1,101 @@
+#!/usr/bin/python3#!/usr/bin/python3
+"""
+    A page handler fro places.
+"""
+from flask import abort, jsonify, request
+from api.v1.views import app_views
+from models import storage
+from models.amenity import Amenity
+from models.city import City
+from models.place import Place
+from models.state import State
+from models.user import User
+
+
+@app_views.route('/cities/<id>/places', methods=['GET', 'POST'])
+def cities_id_places(id):
+    """
+        Retrieves specific id.
+    """
+    city = storage.get(City, id)
+    if not city:
+        abort(404)
+
+    if request.method == 'GET':
+        return jsonify([p.to_dict() for p in city.places])
+
+    if request.method == 'POST':
+        kwargs = request.get_json()
+        if not kwargs:
+            return {"error": "Not a JSON"}, 400
+        if "user_id" not in kwargs:
+            return {"error": "Missing user_id"}, 400
+        user = storage.get(User, kwargs.get("user_id", None))
+        if not user:
+            abort(404)
+        if "name" not in kwargs:
+            return {"error": "Missing name"}, 400
+
+        new_place = Place(city_id=id, **kwargs)
+        new_place.save()
+        return jsonify(new_place.to_dict()), 201
+
+
+@app_views.route('/places/<id>', methods=['GET', 'PUT', 'DELETE'])
+def places_id(id):
+    """
+        Get put delete for places id.
+    """
+    place = storage.get(Place, id)
+    if not place:
+        abort(404)
+
+    if request.method == 'GET':
+        return jsonify(place.to_dict())
+
+    if request.method == 'PUT':
+        kwargs = request.get_json()
+        if not kwargs:
+            return {"error": "Not a JSON"}, 400
+        for k, v in kwargs.items():
+            if k not in ["id", "user_id",
+                         "city_id", "created_at", "updated_at"]:
+                setattr(place, k, v)
+        place.save()
+        return jsonify(place.to_dict())
+
+    if request.method == 'DELETE':
+        place.delete()
+        storage.save()
+        return jsonify({}), 200
+
+
+@app_views.route('/places_search', methods=['POST'])
+def places_search():
+    """
+    post places_search
+    """
+    kwargs = request.get_json()
+    if not kwargs:
+        return {"error": "Not a JSON"}, 400
+
+    states = kwargs.get('states', [])
+    cities = kwargs.get('cities', [])
+    amenities = kwargs.get('amenities', [])
+
+    places = []
+    for state_id in states:
+        state = storage.get(State, state_id)
+        if state:
+            cities.extend(c.id for c in state.cities)
+    for city_id in cities:
+        city = storage.get(City, city_id)
+        if city:
+            places.extend(city.places)
+
+    search_result = []
+    for place in places:
+        if all(storage.get(Amenity, a) in place.amenities for a in amenities):
+            search_result.append(place.to_dict())
+
+    return jsonify(search_result)
